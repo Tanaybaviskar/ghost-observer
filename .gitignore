@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+.env
+*.db           # Ignore the Ghost SQLite data
+dist/          # Ignore build artifacts
+*.egg-info/

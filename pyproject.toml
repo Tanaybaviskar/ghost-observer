@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "ghost-observer"
+version = "0.1.0"
+description = "Watch any Python app run. See what static tools can't."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "click>=8.0",
+]
+
+[project.scripts]
+ghost = "ghost.cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ghost*"]
