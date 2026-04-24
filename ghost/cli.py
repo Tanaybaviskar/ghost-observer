@@ -136,3 +136,6 @@ def run_cmd(script: str, script_args: tuple[str, ...]) -> None:
 
     events = drain_buffer()
     _print_summary(events)
+
+if __name__ == "__main__":
+    cli()
