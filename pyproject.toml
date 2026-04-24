@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "ghost-observer"
@@ -11,6 +11,13 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = [
     "click>=8.0",
+    "google-generativeai>=0.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-timeout",
 ]
 
 [project.scripts]
