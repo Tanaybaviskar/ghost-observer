@@ -109,7 +109,7 @@ ghost explain <your_function_name>
 ```
 ghost run app.py
     │
-    ├─ sys.setprofile hook (_observer.py)
+    ├─ sys.setprofile & sys.settrace hooks (_observer.py)
     │       │  appends (fn_key, event, arg_types, ret_type,
     │       │           is_exc, timestamp_ns, caller_key)
     │       ▼
@@ -132,4 +132,4 @@ Ghost captures `type(value).__qualname__`, **never** the value itself.  No user 
 
 ## Performance
 
-The hot-path hook appends one tuple per event with no I/O, no function calls, and no computation beyond a `type()` call.  Overhead is ~50–100ns per event on modern hardware.
+The hot-path hooks append one tuple per event with no I/O, no function calls, and no computation beyond a `type()` call. Overhead is ~50–100ns per event on modern hardware. Exceptions are efficiently tracked using a localized `sys.settrace` hook.
