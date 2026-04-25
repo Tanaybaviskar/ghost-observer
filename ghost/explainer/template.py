@@ -14,6 +14,8 @@ from ghost.explainer.base import BaseExplainer
 def _ns_to_human(ns: float | None) -> str:
     if ns is None:
         return "n/a"
+    if ns == 0:
+        return "<1µs"       # Windows timer resolution limit
     if ns < 1_000:
         return f"{ns:.0f}ns"
     if ns < 1_000_000:

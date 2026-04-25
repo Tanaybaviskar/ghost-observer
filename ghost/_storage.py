@@ -117,13 +117,15 @@ CREATE TABLE IF NOT EXISTS profiles (
 # ---------------------------------------------------------------------------
 
 def open_db(session_id: str, read_only: bool = False) -> sqlite3.Connection:
+    """Open the session DB.
+
+    read_only=True skips the DDL commit so we don't bump the file mtime
+    (which would corrupt the mtime-based session ordering on some platforms).
+    The DB must already exist when read_only=True.
+    """
     path = session_db_path(session_id)
-    if read_only and path.exists():
-        # Open without touching mtime — prevents messing up session ordering
-        uri = path.as_uri() + "?mode=ro"
-        conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
-    else:
-        conn = sqlite3.connect(str(path), check_same_thread=False)
+    conn = sqlite3.connect(str(path), check_same_thread=False)
+    if not read_only:
         conn.executescript(_DDL)
         conn.commit()
     return conn

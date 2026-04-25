@@ -22,13 +22,16 @@ pip install ghost-observer
 # Observe a script
 ghost run app.py
 
-# View profile for the last session
+# View profile for the last session (options: --top 20, --sort latency/calls/exc)
 ghost report
+ghost report --sort latency --top 10
 
 # Explain a specific function (auto-detects Gemini if GEMINI_API_KEY is set)
 ghost explain process_order
+ghost explain process_order --backend gemini
 
 # Run all anomaly detectors
+# Configurable with: --exc-threshold 0.05, --latency-z 2.5, --script <name>
 ghost anomalies
 
 # Compare two sessions
@@ -36,6 +39,16 @@ ghost diff <session1> <session2>
 
 # List sessions
 ghost sessions
+
+# Clean up old session files (default: 7 days)
+ghost clean
+ghost clean --older-than 1
+ghost clean --dry-run  # Preview what would be deleted without deleting
+
+# Export session profile data (options: --format json/csv)
+ghost export
+ghost export --format csv -o profile.csv
+ghost export 1777123710-6ff2ebb1 --format json
 ```
 
 ## LLM backends

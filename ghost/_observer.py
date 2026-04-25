@@ -164,7 +164,7 @@ def _profile_hook(frame: types.FrameType, event: str, arg: Any) -> None:
         _raising().clear()
         _clear_done()
 
-    ts = time.monotonic_ns()
+    ts = time.perf_counter_ns()
     key = frame_key(frame)
 
     caller = frame.f_back

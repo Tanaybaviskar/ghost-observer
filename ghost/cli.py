@@ -56,6 +56,8 @@ def _resolve_session(session_id: str | None) -> str:
 def _ns_to_human(ns: float | None) -> str:
     if ns is None:
         return "n/a"
+    if ns == 0:
+        return "<1µs"       # Windows timer resolution limit
     if ns < 1_000:
         return f"{ns:.0f}ns"
     if ns < 1_000_000:
@@ -377,3 +379,93 @@ def diff_cmd(session1: str, session2: str) -> None:
 
     entries = diff_sessions(agg1, agg2)
     click.echo(format_diff(entries, session1, session2))
+
+
+# ---------------------------------------------------------------------------
+# ghost clean
+# ---------------------------------------------------------------------------
+
+@cli.command(name="clean")
+@click.option("--older-than", default=7, show_default=True,
+              help="Delete sessions older than N days.")
+@click.option("--dry-run", is_flag=True,
+              help="Show what would be deleted without deleting.")
+def clean_cmd(older_than: int, dry_run: bool) -> None:
+    """Delete sessions older than N days."""
+    import time as _time
+    cutoff = _time.time() - older_than * 86400
+    deleted = 0
+    kept = 0
+    for sid in list_sessions():
+        try:
+            ts = int(sid.split("-")[0])
+        except ValueError:
+            kept += 1
+            continue
+        if ts < cutoff:
+            path = session_db_path(sid)
+            if dry_run:
+                click.echo(f"  would delete  {sid}")
+            else:
+                path.unlink(missing_ok=True)
+                click.echo(f"  deleted  {sid}")
+            deleted += 1
+        else:
+            kept += 1
+    label = "would delete" if dry_run else "deleted"
+    click.echo(f"\n  {label} {deleted} session(s)  ·  {kept} kept\n")
+
+
+# ---------------------------------------------------------------------------
+# ghost export
+# ---------------------------------------------------------------------------
+
+@cli.command(name="export")
+@click.argument("session", required=False, default=None)
+@click.option("--format", "fmt", default="json",
+              type=click.Choice(["json", "csv"]),
+              show_default=True)
+@click.option("--output", "-o", default=None,
+              help="Output file path. Defaults to stdout.")
+def export_cmd(session: str | None, fmt: str, output: str | None) -> None:
+    """Export session profiles as JSON or CSV.
+
+    SESSION defaults to the most recent session.
+
+      ghost export --format csv -o profile.csv
+    """
+    import csv as _csv
+    import io
+    import json as _json
+
+    sid = _resolve_session(session)
+    conn = open_db(sid, read_only=True)
+    agg = Aggregator.rebuild_from_db(conn, sid)
+    conn.close()
+
+    profiles = [
+        p.to_dict() for p in agg.profiles().values()
+        if not p.fn_key.startswith("ghost.")
+        and not p.fn_key.startswith("ghost._")
+        and "<module>" not in p.fn_key
+    ]
+
+    if fmt == "json":
+        text = _json.dumps({"session_id": sid, "profiles": profiles}, indent=2)
+    else:
+        buf = io.StringIO()
+        if profiles:
+            fields = ["fn_key", "call_count", "exception_count", "exception_rate",
+                      "mean_latency_ns", "min_latency_ns", "max_latency_ns",
+                      "total_latency_ns"]
+            w = _csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
+            w.writeheader()
+            w.writerows(profiles)
+        text = buf.getvalue()
+
+    if output:
+        from pathlib import Path as _Path
+        _Path(output).write_text(text, encoding="utf-8")
+        click.echo(f"Exported {len(profiles)} functions → {output}")
+    else:
+        click.echo(text)

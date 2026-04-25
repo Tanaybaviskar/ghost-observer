@@ -52,6 +52,11 @@ class FunctionProfile:
         completed = self.call_count - len(self._in_flight)
         if completed <= 0:
             return None
+        if self.total_latency_ns == 0:
+            # All calls completed within one timer tick (common on Windows).
+            # Return 0.0 so callers can distinguish "measured zero" from
+            # "no data" (None). Display layer renders this as "<1µs".
+            return 0.0
         return self.total_latency_ns / completed
 
     def dominant_arg_sig(self) -> str:
