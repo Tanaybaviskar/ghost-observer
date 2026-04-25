@@ -141,15 +141,33 @@ def run_cmd(script: str, script_args: tuple[str, ...],
 @cli.command(name="sessions")
 def sessions_cmd() -> None:
     """List all recorded Ghost sessions (newest first)."""
+    import sqlite3 as _sq3
     sessions = list_sessions()
     if not sessions:
         click.echo("No sessions found.")
         return
-    click.echo(f"{'SESSION ID':40}  {'DB PATH'}")
-    click.echo("─" * 80)
-    for sid in sessions:
+    click.echo(f"\n{'#':>3}  {'SESSION ID':32}  {'SCRIPT':30}  {'EVENTS':>7}  {'DATE'}")
+    click.echo("─" * 90)
+    for i, sid in enumerate(sessions, 1):
         path = session_db_path(sid)
-        click.echo(f"{sid:40}  {path}")
+        try:
+            c = _sq3.connect(str(path))
+            row = c.execute(
+                "SELECT script_path, total_events, started_at FROM sessions WHERE session_id=?",
+                (sid,)
+            ).fetchone()
+            c.close()
+            if row:
+                import os as _os, datetime as _dt
+                script = _os.path.basename(row[0])
+                events = row[1] or 0
+                started = _dt.datetime.fromtimestamp(row[2] / 1000).strftime("%m-%d %H:%M")
+                click.echo(f"{i:>3}  {sid:32}  {script:30}  {events:>7}  {started}")
+            else:
+                click.echo(f"{i:>3}  {sid:32}  (no metadata)")
+        except Exception:
+            click.echo(f"{i:>3}  {sid:32}  (unreadable)")
+    click.echo()
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +187,7 @@ def report_cmd(session: str | None, top: int, sort: str) -> None:
     SESSION defaults to the most recent session.
     """
     sid = _resolve_session(session)
-    conn = open_db(sid)
+    conn = open_db(sid, read_only=True)
     agg = Aggregator.rebuild_from_db(conn, sid)
     conn.close()
 
@@ -177,6 +195,14 @@ def report_cmd(session: str | None, top: int, sort: str) -> None:
     if not profiles:
         click.echo("No profile data found for this session.")
         return
+
+    # Filter out ghost's own internals and top-level module frames
+    profiles = [
+        p for p in profiles
+        if not p.fn_key.startswith("ghost.")
+        and not p.fn_key.startswith("ghost._")
+        and "<module>" not in p.fn_key
+    ]
 
     if sort == "calls":
         profiles.sort(key=lambda p: -p.call_count)
@@ -205,7 +231,11 @@ def report_cmd(session: str | None, top: int, sort: str) -> None:
         )
 
     click.echo("─" * 80)
-    click.echo(f"  Showing top {len(profiles)} of {len(agg.profiles())} functions.\n")
+    total_user = len([p for p in agg.profiles().values()
+                      if not p.fn_key.startswith("ghost.")
+                      and not p.fn_key.startswith("ghost._")
+                      and "<module>" not in p.fn_key])
+    click.echo(f"  Showing {len(profiles)} of {total_user} user functions.\n")
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +313,7 @@ def anomalies_cmd(session: str | None, exc_threshold: float,
     SESSION defaults to the most recent session.
     """
     sid = _resolve_session(session)
-    conn = open_db(sid)
+    conn = open_db(sid, read_only=True)
     agg = Aggregator.rebuild_from_db(conn, sid)
 
     # Try to find the script path from session metadata if not provided

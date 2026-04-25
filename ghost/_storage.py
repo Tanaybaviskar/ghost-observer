@@ -44,10 +44,21 @@ def session_db_path(session_id: str) -> Path:
 
 
 def list_sessions() -> list[str]:
-    """Return session IDs sorted newest-first."""
+    """Return session IDs sorted newest-first.
+
+    Sort by the unix timestamp embedded in the session ID (format: <ts>-<hex>)
+    rather than file mtime, which can be perturbed by read-only DB opens.
+    """
     d = _db_dir()
-    paths = sorted(d.glob("*.db"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return [p.stem for p in paths]
+    stems = [p.stem for p in d.glob("*.db")]
+
+    def _ts(sid: str) -> int:
+        try:
+            return int(sid.split("-")[0])
+        except (ValueError, IndexError):
+            return 0
+
+    return sorted(stems, key=_ts, reverse=True)
 
 
 # ---------------------------------------------------------------------------
@@ -105,11 +116,16 @@ CREATE TABLE IF NOT EXISTS profiles (
 # Connection helper
 # ---------------------------------------------------------------------------
 
-def open_db(session_id: str) -> sqlite3.Connection:
+def open_db(session_id: str, read_only: bool = False) -> sqlite3.Connection:
     path = session_db_path(session_id)
-    conn = sqlite3.connect(str(path), check_same_thread=False)
-    conn.executescript(_DDL)
-    conn.commit()
+    if read_only and path.exists():
+        # Open without touching mtime — prevents messing up session ordering
+        uri = path.as_uri() + "?mode=ro"
+        conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+    else:
+        conn = sqlite3.connect(str(path), check_same_thread=False)
+        conn.executescript(_DDL)
+        conn.commit()
     return conn
 
 
@@ -180,11 +196,11 @@ class FlushThread(threading.Thread):
     BUSY_INTERVAL  = 1.0
     BUSY_THRESHOLD = 5_000
 
-    def __init__(self, conn: sqlite3.Connection, str_session_id: str,
+    def __init__(self, conn: sqlite3.Connection, session_id: str,
                  aggregator: "Aggregator | None" = None) -> None:  # noqa: F821
         super().__init__(name="ghost-flush", daemon=True)
         self._conn = conn
-        self._session_id = str_session_id
+        self._session_id = session_id
         self._aggregator = aggregator
         self._stop_event = threading.Event()
         self._total_written = 0

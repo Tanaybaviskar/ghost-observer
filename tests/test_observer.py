@@ -1,23 +1,39 @@
-
 """Tests for the observer hot-path and buffer mechanics."""
+import importlib.util
+import os
 import sys
-import time
+import tempfile
+import textwrap
 
 import pytest
 
-from ghost._observer import (
-    _BUFFER,
-    _is_user_frame,
-    drain_buffer,
-    install,
-    uninstall,
-)
+from ghost._observer import drain_buffer, install, uninstall
+from ghost import _observer
+
+
+# ---------------------------------------------------------------------------
+# Helper: load a snippet from a real temp file so _is_user_frame passes
+# ---------------------------------------------------------------------------
+
+def _load_tempmod(src: str, name: str = "ghost_test_tmp"):
+    """Write src to a real .py file and import it as a module."""
+    tmp = tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode="w",
+                                     encoding="utf-8")
+    tmp.write(textwrap.dedent(src))
+    tmp.close()
+    spec = importlib.util.spec_from_file_location(name, tmp.name)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod, tmp.name
 
 
 def _clear():
-    from ghost import _observer
     _observer._BUFFER.clear()
 
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
 
 def test_install_uninstall():
     install()
@@ -27,13 +43,13 @@ def test_install_uninstall():
 
 
 def test_events_captured():
+    mod, path = _load_tempmod("""
+        def target(x, y):
+            return str(x) + y
+    """)
     _clear()
     install()
-
-    def target(x: int, y: str) -> str:
-        return f"{x}-{y}"
-
-    target(1, "hello")
+    mod.target(1, "hello")
     uninstall()
 
     events = drain_buffer()
@@ -43,16 +59,17 @@ def test_events_captured():
     assert any("target" in k for k in fn_keys), f"target not in {fn_keys}"
     assert "call" in event_types
     assert "return" in event_types
+    os.unlink(path)
 
 
 def test_arg_types_captured_not_values():
+    mod, path = _load_tempmod("""
+        def typed_fn(a, b):
+            pass
+    """)
     _clear()
     install()
-
-    def typed_fn(a: int, b: str):
-        pass
-
-    typed_fn(42, "secret_password")
+    mod.typed_fn(42, "secret_password")
     uninstall()
 
     events = drain_buffer()
@@ -60,45 +77,48 @@ def test_arg_types_captured_not_values():
     assert call_events, "No call event for typed_fn"
     arg_types = call_events[0][2]
 
-    # Must capture the type name, not the value
     assert "int" in arg_types
     assert "str" in arg_types
-    # The VALUE must never appear
-    for ev in events:
-        for field in ev:
-            assert "secret_password" not in str(field), \
-                "Value leaked into event buffer!"
-            assert "42" not in str(field) or True  # ints are fine as int, not as 42
+    # The actual value must never appear anywhere in the buffer
+    all_text = str(events)
+    assert "secret_password" not in all_text, "Value leaked into event buffer!"
+    os.unlink(path)
 
 
 def test_exception_event():
+    mod, path = _load_tempmod("""
+        def raises():
+            raise RuntimeError("boom")
+    """)
     _clear()
     install()
-
-    def raises():
-        raise RuntimeError("boom")
-
     try:
-        raises()
+        mod.raises()
     except RuntimeError:
         pass
     finally:
         uninstall()
 
     events = drain_buffer()
+    # sys.setprofile signals exceptions as "return" events with arg=None,
+    # which our hook marks as is_exception=True (index 4).
     exc_events = [e for e in events if e[4] is True]
-    assert exc_events, "No exception event recorded"
+    assert exc_events, (
+        f"No exception event recorded.\n"
+        f"Events: {events}\n"
+        f"Note: exceptions appear as return events with is_exception=True"
+    )
+    os.unlink(path)
 
 
 def test_drain_is_atomic():
-    """After drain, buffer must be empty."""
+    mod, path = _load_tempmod("""
+        def simple():
+            pass
+    """)
     _clear()
     install()
-
-    def simple():
-        pass
-
-    simple()
+    mod.simple()
     uninstall()
 
     first = drain_buffer()
@@ -106,22 +126,24 @@ def test_drain_is_atomic():
 
     assert len(first) > 0
     assert len(second) == 0
+    os.unlink(path)
 
 
 def test_buffer_max_cap():
-    from ghost import _observer
+    mod, path = _load_tempmod("""
+        def spam():
+            pass
+    """)
     original_max = _observer._MAX_BUFFER
     _observer._MAX_BUFFER = 5
     _clear()
     install()
-
-    def spam():
-        pass
-
-    for _ in range(20):
-        spam()
+    for _ in range(50):
+        mod.spam()
     uninstall()
 
     events = drain_buffer()
-    assert len(events) <= 5 + 5, f"Buffer exceeded max: {len(events)}"
+    # Allow a few extra for the install/uninstall frames themselves
+    assert len(events) <= 10, f"Buffer exceeded max: {len(events)}"
     _observer._MAX_BUFFER = original_max
+    os.unlink(path)

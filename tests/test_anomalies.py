@@ -56,7 +56,8 @@ def test_latency_outlier_detected():
     slow.max_latency_ns = 510_000_000
     agg._profiles[slow.fn_key] = slow
 
-    results = detect_latency_outliers(agg, z_threshold=2.5)
+    # 6 samples: 5 at 1ms, 1 at 500ms → z≈2.24 for the outlier, so use threshold 2.0
+    results = detect_latency_outliers(agg, z_threshold=2.0)
     assert any(r.fn_key == "mymod:slow_fn:99" for r in results)
 
 

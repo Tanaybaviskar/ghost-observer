@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -26,3 +26,6 @@ ghost = "ghost.cli:cli"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["ghost*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

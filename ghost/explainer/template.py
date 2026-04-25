@@ -1,4 +1,3 @@
-
 """
 ghost/explainer/template.py
 

@@ -118,23 +118,30 @@ class Aggregator:
                     p._in_flight[flight_key] = ts_ns
 
                 elif event == "return":
-                    if ret_or_exc:
-                        p.ret_type_dist[ret_or_exc] = p.ret_type_dist.get(ret_or_exc, 0) + 1
-                    # Close oldest in-flight entry (LIFO approximation)
-                    if p._in_flight:
-                        oldest_key = next(iter(p._in_flight))
-                        call_ts = p._in_flight.pop(oldest_key)
-                        latency = ts_ns - call_ts
-                        if latency >= 0:
-                            p.total_latency_ns += latency
-                            if p.min_latency_ns is None or latency < p.min_latency_ns:
-                                p.min_latency_ns = latency
-                            if p.max_latency_ns is None or latency > p.max_latency_ns:
-                                p.max_latency_ns = latency
+                    if is_exc:
+                        # sys.setprofile signals exceptions as return-with-None-arg.
+                        # Our hook marks these with is_exception=True.
+                        p.exception_count += 1
+                        p._in_flight.clear()  # abandon in-flight on exception
+                    else:
+                        if ret_or_exc:
+                            p.ret_type_dist[ret_or_exc] = p.ret_type_dist.get(ret_or_exc, 0) + 1
+                        # Close oldest in-flight entry (LIFO approximation)
+                        if p._in_flight:
+                            oldest_key = next(iter(p._in_flight))
+                            call_ts = p._in_flight.pop(oldest_key)
+                            latency = ts_ns - call_ts
+                            if latency >= 0:
+                                p.total_latency_ns += latency
+                                if p.min_latency_ns is None or latency < p.min_latency_ns:
+                                    p.min_latency_ns = latency
+                                if p.max_latency_ns is None or latency > p.max_latency_ns:
+                                    p.max_latency_ns = latency
 
                 elif event == "exception":
+                    # sys.settrace only — kept for safety
                     p.exception_count += 1
-                    p._in_flight.clear()  # abandon in-flight on exception
+                    p._in_flight.clear()
 
     def _get_or_create(self, fn_key: str) -> FunctionProfile:
         p = self._profiles.get(fn_key)
