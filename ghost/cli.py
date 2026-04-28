@@ -469,3 +469,101 @@ def export_cmd(session: str | None, fmt: str, output: str | None) -> None:
         click.echo(f"Exported {len(profiles)} functions → {output}")
     else:
         click.echo(text)
+
+
+# ---------------------------------------------------------------------------
+# ghost watch
+# ---------------------------------------------------------------------------
+
+@cli.command(name="watch")
+@click.argument("session", required=False, default=None)
+@click.option("--interval", default=2.0, show_default=True,
+              help="Refresh interval in seconds.")
+@click.option("--sort", default="calls",
+              type=click.Choice(["calls", "latency", "exceptions"]),
+              help="Sort key.")
+@click.option("--top", default=20, show_default=True)
+def watch_cmd(session: str | None, interval: float, sort: str, top: int) -> None:
+    """Live-updating report for an active or recent session.
+
+    Refreshes every INTERVAL seconds.  Press Ctrl+C to quit.
+
+      ghost watch                   # watch most recent session
+      ghost watch <session-id>      # watch a specific session
+    """
+    import time as _time
+    import os as _os
+    import sqlite3 as _sq3
+
+    sid = _resolve_session(session)
+    path = session_db_path(sid)
+
+    def _render() -> str:
+        try:
+            conn = _sq3.connect(str(path), check_same_thread=False)
+            agg = Aggregator.rebuild_from_db(conn, sid)
+            # Also pull live session row
+            row = conn.execute(
+                "SELECT script_path, total_events, started_at FROM sessions WHERE session_id=?",
+                (sid,)
+            ).fetchone()
+            conn.close()
+        except Exception as e:
+            return f"[ghost watch] error reading session: {e}\n"
+
+        profiles = [
+            p for p in agg.profiles().values()
+            if not p.fn_key.startswith("ghost.")
+            and not p.fn_key.startswith("ghost._")
+            and "<module>" not in p.fn_key
+        ]
+
+        if sort == "calls":
+            profiles.sort(key=lambda p: -p.call_count)
+        elif sort == "latency":
+            profiles.sort(key=lambda p: -(p.mean_latency_ns or 0))
+        elif sort == "exceptions":
+            profiles.sort(key=lambda p: -p.exception_rate)
+
+        profiles = profiles[:top]
+
+        import datetime as _dt
+        script = _os.path.basename(row[0]) if row else "unknown"
+        events = row[1] if row else 0
+        started = _dt.datetime.fromtimestamp(row[2] / 1000).strftime("%H:%M:%S") if row else "?"
+        now = _dt.datetime.now().strftime("%H:%M:%S")
+
+        lines = []
+        lines.append(f"Ghost watch  ·  {script}  ·  started {started}  ·  {events:,} events  ·  {now}")
+        lines.append("─" * 80)
+        lines.append(f"{'FUNCTION':45} {'CALLS':>7} {'EXC%':>6} {'MEAN LAT':>10}  {'DOM. ARG SIG'}")
+        lines.append("─" * 80)
+
+        for p in profiles:
+            _, qualname, lineno = parse_key(p.fn_key)
+            name_col = f"{qualname}:{lineno}"[:45]
+            exc_pct = f"{p.exception_rate:.0%}" if p.call_count > 0 else "—"
+            mean_lat = _ns_to_human(p.mean_latency_ns)
+            dom_sig = p.dominant_arg_sig()[:28]
+            lines.append(f"{name_col:45} {p.call_count:>7,} {exc_pct:>6} {mean_lat:>10}  {dom_sig}")
+
+        lines.append("─" * 80)
+        lines.append(f"  {len(profiles)} functions  ·  refresh {interval}s  ·  Ctrl+C to quit")
+        return "\n".join(lines)
+
+    # Clear screen helper — works on Windows and Unix
+    def _clear():
+        click.echo("\033[2J\033[H", nl=False)
+
+    click.echo(f"[ghost watch] watching session {sid[:20]}...  (Ctrl+C to quit)")
+    _time.sleep(0.3)
+
+    try:
+        while True:
+            output = _render()
+            _clear()
+            click.echo(output)
+            _time.sleep(interval)
+    except KeyboardInterrupt:
+        _clear()
+        click.echo("[ghost watch] stopped.")
