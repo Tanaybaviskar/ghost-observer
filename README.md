@@ -1,3 +1,9 @@
+![PyPI](https://img.shields.io/pypi/v/ghost-observer)
+![Downloads](https://img.shields.io/pypi/dm/ghost-observer)
+![Python](https://img.shields.io/pypi/pyversions/ghost-observer)
+![License](https://img.shields.io/github/license/Tanaybaviskar/ghost-observer)
+
+
 # ghost-observer
 
 **Copilot reads source. Ghost reads runtime.**
